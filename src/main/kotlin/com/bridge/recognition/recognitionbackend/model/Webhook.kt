@@ -9,7 +9,7 @@ import java.time.LocalDateTime
 
 @Entity
 @Table(name = "webhooks")
-class Webhook(
+data class Webhook(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long?,

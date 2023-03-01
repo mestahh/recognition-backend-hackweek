@@ -9,13 +9,14 @@ import java.time.LocalDateTime
 
 @Entity
 @Table(name = "messages")
-class RecognitionMessage(
+data class RecognitionMessage(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long?,
     val message: String,
     val recipients: String,
-    val senderName: String,
-    val public: Boolean = false,
+    val senderEmail: String,
+    var public: Boolean = false,
+    val tags: String?,
     val createdAt: LocalDateTime
 )
