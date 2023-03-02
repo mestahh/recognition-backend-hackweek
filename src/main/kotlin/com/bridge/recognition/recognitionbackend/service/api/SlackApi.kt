@@ -12,8 +12,7 @@ import org.springframework.stereotype.Component
 @Component
 class SlackApi(val slack: Slack) {
 
-    //    private val SLACK_TOKEN = "xoxb-4887669717264-4863878395427-NYiVfrYuxoDPxMYrxGmT5TrV"  //Test
-    private val SLACK_TOKEN = "xoxb-199397134436-4862721027111-yuu7GfOrDR4SpwLPDNNFLEMt" //Bridge
+    private val SLACK_TOKEN = "TOKEN" //Bridge
 
     fun getEmailForSlackId(slackId: String): UsersInfoResponse {
         val methods: MethodsClient = slack.methods(SLACK_TOKEN)
