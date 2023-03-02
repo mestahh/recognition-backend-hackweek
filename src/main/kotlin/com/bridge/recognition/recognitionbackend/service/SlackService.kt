@@ -1,11 +1,16 @@
 package com.bridge.recognition.recognitionbackend.service
 
 import com.bridge.recognition.recognitionbackend.dao.MessagesRepository
+import com.bridge.recognition.recognitionbackend.dao.WebhooksRepository
+import com.bridge.recognition.recognitionbackend.factory.SlackMessageFactory
+import com.bridge.recognition.recognitionbackend.model.EmojiMap
 import com.bridge.recognition.recognitionbackend.model.RecognitionMessage
 import com.bridge.recognition.recognitionbackend.model.WebhookMessage
+import com.bridge.recognition.recognitionbackend.service.api.SlackApi
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.slack.api.Slack
 import com.slack.api.methods.MethodsClient
+import com.slack.api.methods.request.emoji.EmojiListRequest
 import com.slack.api.methods.request.users.UsersInfoRequest
 import com.slack.api.methods.request.users.UsersLookupByEmailRequest
 import org.springframework.scheduling.annotation.Async
@@ -18,10 +23,16 @@ import java.util.concurrent.CompletableFuture
 class SlackService(
     val slack: Slack,
     val messagesRepository: MessagesRepository,
-    val objectMapper: ObjectMapper
+    val objectMapper: ObjectMapper,
+    val webhooksRepository: WebhooksRepository,
+    val slackMessageFactory: SlackMessageFactory,
+    val emojiMap: EmojiMap,
+    val slackApi: SlackApi,
+    val messageParser: MessageTextParser
 ) {
-    private val TAGS_PREFIX = "##"
-    private val SLACK_TOKEN = "token"
+    init {
+        loadEmojiList().forEach { (key, value) -> emojiMap.emojis[key] = value.replace("\\", "") }
+    }
 
     @Async
     fun sendRecognitionMessage(values: MultiValueMap<String, String>): CompletableFuture<RecognitionMessage> {
@@ -31,75 +42,58 @@ class SlackService(
 
         val m = RecognitionMessage(
             id = null,
-            message = getMessage(text),
-            recipients = getRecipients(text),
+            message = messageParser.getMessage(text),
+            recipients = messageParser.getRecipients(text),
             senderEmail = "$senderEmail",
             public = true,
             createdAt = LocalDateTime.now(),
-            tags = getTags(text)
+            tags = messageParser.getTags(text)
         )
         val storedMessage = messagesRepository.save(m)
+        sendNotifications(storedMessage)
         return CompletableFuture.completedFuture(storedMessage);
 
     }
 
-    fun getRecipients(text: String): String {
-        val recipients = mutableListOf<String>()
-        text.split(" ").forEach {
-            if (it.startsWith("<@")) {
-                var userId =
-                    it.replace("<@", "").replace(">", "")
-                userId = userId.substring(0, userId.indexOf("|"))
-                recipients.add(getEmailForUserId(userId))
-            }
-        }
-        return recipients.joinToString(",")
-    }
-
-    fun getMessage(text: String): String {
-        val message = mutableListOf<String>()
-        text.split(" ").forEach {
-            if (!it.startsWith("<@") && !it.startsWith(TAGS_PREFIX)) {
-                message.add(it)
-            }
-        }
-        return message.joinToString(" ")
-    }
-
-
-    fun getTags(text: String): String {
-        var tags = mutableListOf<String>()
-        text.split(" ").forEach {
-            if (it.startsWith(TAGS_PREFIX)) {
-                tags.add(it.replace(TAGS_PREFIX, ""))
-            }
-        }
-        return tags.joinToString(",")
-    }
-
     fun getEmailForUserId(userId: String): String {
-        val methods: MethodsClient = slack.methods(SLACK_TOKEN)
-        val usersInfoRequest = UsersInfoRequest.builder().user(userId).build()
-        val userInfo = methods.usersInfo(usersInfoRequest)
-         userInfo.user.let {
+        val userInfo = slackApi.getEmailForSlackId(userId)
+        userInfo.user?.let {
             return it.profile.email
         }
         return ""
     }
 
     fun sendWebhookmessage(url: String, message: WebhookMessage) {
-        val slack: Slack = Slack.getInstance()
         val payload = objectMapper.writeValueAsString(message)
         slack.send(url, payload)
     }
 
     fun getSlackUserIdForEmail(userEmail: String): String {
-        val methods: MethodsClient = slack.methods(SLACK_TOKEN)
-        val userEmailRequest = UsersLookupByEmailRequest.builder().email(userEmail).build()
-        val userEmail = methods.usersLookupByEmail(userEmailRequest)
-        userEmail.user?.let {
-            return userEmail.user.id
+       val userId = slackApi.getSlackUserIdForEmail(userEmail)
+        userId.user?.let {
+            return userId.user.id
         }
         return "NOT_FOUND"
+    }
+
+    fun sendNotifications(recognitionMessage: RecognitionMessage) {
+        if (recognitionMessage.public) {
+            val senderSlackId = "<@${getSlackUserIdForEmail(recognitionMessage.senderEmail)}>"
+            val recipientsSlackIds = getRecipientsSlackIds(recognitionMessage.recipients)
+            webhooksRepository.findAll().map {
+                val message = slackMessageFactory.createSlackMessage(senderSlackId, recipientsSlackIds, recognitionMessage)
+                sendWebhookmessage(it.webhookUrl, message)
+            }
+        }
+    }
+
+     fun getRecipientsSlackIds(recipients: String): String {
+        return recipients.split(",").map {
+            "<@${getSlackUserIdForEmail(it)}>"
+        }.toList().joinToString(" ")
+    }
+
+    fun loadEmojiList(): MutableMap<String, String> {
+        return slackApi.loadCustomEmojis()
     }
 }

@@ -2,14 +2,10 @@ package com.bridge.recognition.recognitionbackend.controller
 
 import com.bridge.recognition.recognitionbackend.dao.MessagesRepository
 import com.bridge.recognition.recognitionbackend.dao.WebhooksRepository
+import com.bridge.recognition.recognitionbackend.factory.SlackMessageFactory
 import com.bridge.recognition.recognitionbackend.model.RecognitionMessage
 import com.bridge.recognition.recognitionbackend.model.Webhook
-import com.bridge.recognition.recognitionbackend.service.RecognitionService
 import com.bridge.recognition.recognitionbackend.service.SlackService
-import com.slack.api.Slack
-import com.slack.api.methods.MethodsClient
-import com.slack.api.methods.request.users.UsersInfoRequest
-import com.slack.api.methods.request.users.UsersInfoRequest.UsersInfoRequestBuilder
 import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -25,7 +21,7 @@ import java.time.LocalDateTime
 class RecognitionController(
     val webhookRepository: WebhooksRepository,
     val messagesRepository: MessagesRepository,
-    val recognitionService: RecognitionService,
+    val slackMessageFactory: SlackMessageFactory,
     val slackService: SlackService
 ) {
 
@@ -38,7 +34,7 @@ class RecognitionController(
     @PostMapping("/recognition/messages")
     fun createMessage(@RequestBody message: RecognitionMessage): RecognitionMessage {
         val message = messagesRepository.save(message)
-        recognitionService.sendNotifications(message)
+        slackService.sendNotifications(message)
         return message
     }
 
@@ -50,6 +46,7 @@ class RecognitionController(
     @GetMapping("/recognition/messages")
     fun getMessages(): List<RecognitionMessage> {
         return messagesRepository.findAllByOrderByCreatedAtDesc()
+            .map { it.copy(message = slackMessageFactory.replaceEmojiHtml(it.message)) }
     }
 
     @GetMapping("/recognition/webhooks")
